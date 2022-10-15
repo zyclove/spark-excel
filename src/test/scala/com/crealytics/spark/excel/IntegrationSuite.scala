@@ -72,7 +72,7 @@ class IntegrationSuite
       .map { case ((f, sf), idx) => sf.name -> f(data.toIndexedSeq.map(_.get(idx))) }
   }
 
-  def runTests(maxRowsInMemory: Option[Int], maxByteArraySize: Option[Int] = None): Unit = {
+  def runTests(implementation: String, maxRowsInMemory: Option[Int], maxByteArraySize: Option[Int] = None): Unit = {
     def writeThenRead(
       df: DataFrame,
       schema: Option[StructType] = Some(exampleDataSchema),
@@ -83,7 +83,11 @@ class IntegrationSuite
     ): DataFrame = {
       val theFileName = fileName.getOrElse(File.createTempFile("spark_excel_test_", ".xlsx").getAbsolutePath)
 
-      val writer = df.write.excel(dataAddress = s"'$sheetName'!A1", header = header).mode(saveMode)
+      val writer = df.write
+        .format(implementation)
+        .option("dataAddress", s"'$sheetName'!A1")
+        .option("header", header)
+        .mode(saveMode)
       val configuredWriter =
         Map("dataAddress" -> dataAddress).foldLeft(writer) {
           case (wri, (key, Some(value))) => wri.option(key, value)
@@ -91,7 +95,7 @@ class IntegrationSuite
         }
       configuredWriter.save(theFileName)
 
-      val reader = spark.read.excel(dataAddress = s"'$sheetName'!A1", header = header)
+      val reader = spark.read.format(implementation).option("dataAddress", s"'$sheetName'!A1").option("header", header)
       val configuredReader = Map(
         "maxRowsInMemory" -> maxRowsInMemory,
         "maxByteArraySize" -> maxByteArraySize,
@@ -117,7 +121,9 @@ class IntegrationSuite
       assertDataFrameEquals(expected, inferred)
     }
 
-    describe(s"with maxRowsInMemory = $maxRowsInMemory; maxByteArraySize = $maxByteArraySize") {
+    describe(
+      s"with implementation = $implementation, maxRowsInMemory = $maxRowsInMemory; maxByteArraySize = $maxByteArraySize"
+    ) {
       it("parses known datatypes correctly") {
         forAll(rowsGen) { rows =>
           val expected = spark.createDataset(rows).toDF()
@@ -346,9 +352,11 @@ class IntegrationSuite
     differencesInNonOverwrittenData shouldBe empty
     ()
   }
-  runTests(maxRowsInMemory = None)
-  runTests(maxRowsInMemory = None, maxByteArraySize = Some(100000000))
-  runTests(maxRowsInMemory = Some(20))
-  runTests(maxRowsInMemory = Some(1))
-  runTests(maxRowsInMemory = Some(1), maxByteArraySize = Some(100000000))
+  Seq("excel", "com.crealytics.spark.excel").foreach { implementation =>
+    runTests(implementation, maxRowsInMemory = None)
+    runTests(implementation, maxRowsInMemory = None, maxByteArraySize = Some(100000000))
+    runTests(implementation, maxRowsInMemory = Some(20))
+    runTests(implementation, maxRowsInMemory = Some(1))
+    runTests(implementation, maxRowsInMemory = Some(1), maxByteArraySize = Some(100000000))
+  }
 }
